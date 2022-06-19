@@ -18,22 +18,7 @@
 __device__ __constant__ int d_min_sup;
 __device__ __constant__ int d_unique_item_count;
 
-//void splitTime(std::string message) {
-//	static std::chrono::time_point<std::chrono::steady_clock> start;
-//	static std::chrono::time_point<std::chrono::steady_clock> stop;
-//	stop = std::chrono::high_resolution_clock::now();
-//	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-//	static std::ofstream timefile("time.txt");
-//	if (timefile.is_open()) {
-//		timefile << message << ": " << duration.count() << "\n";
-//	}
-//	else {
-//		std::cout << "Unable to open time file";
-//		exit(0);
-//	}
-//	start = std::chrono::high_resolution_clock::now();
-//}
-
+//function for tracking time of various operations 
 void trackTime(int operation_type) {
 	static std::chrono::time_point<std::chrono::steady_clock> start;
 	static std::chrono::time_point<std::chrono::steady_clock> stop;
@@ -243,16 +228,6 @@ __global__ void scanDatabase(int* database_size, int* sub_database_size, unsigne
 		int min_boundary = 0;
 		int max_boundary = seq_val_trimmed_size[0];
 		int middle_point;
-
-		//determine which sub database given thread is searching
-		//for (j = 0; j <= i; j++) {
-		//	local_sub_database_start += sub_database_size[j];
-		//	if (local_sub_database_start > i) {
-		//		local_sub_database_size = sub_database_size[j];//DON'T MAKE IT LOCAL?
-		//		local_sub_database_start -= local_sub_database_size;
-		//		break;
-		//	}
-		//}
 		
 		//determine which sub database given thread is searching
 		//special case - first sub database:
@@ -324,7 +299,7 @@ __global__ void scanDatabase(int* database_size, int* sub_database_size, unsigne
 			}
 			else {
 				seq_candidate = CHECK_BIT(local_seq, local_char - 97);
-				seq_candidate = already_found_seq | seq_candidate; //DO IN ONE OPERATION?
+				seq_candidate = already_found_seq | seq_candidate; 
 				found_prefix = found_prefix | CHECK_BIT(local_prefix, local_char - 97);
 				if (seq_candidate != already_found_seq && found_prefix == local_prefix) {
 					idx_offset = __popc((local_seq) & (0xffffffff >> (32 - local_char + 97))) + append_idx_offset;
@@ -349,12 +324,6 @@ __global__ void correctOldSupSeqIdx(int* old_sup_seq_idx, int* adj_diff) {
 	else {
 		adj_diff[i] = old_sup_seq_idx[i] - old_sup_seq_idx[i - 1] > 1 ? old_sup_seq_idx[i] - old_sup_seq_idx[i - 1] - 1 : 0;
 	}
-}
-
-__global__ void substraction(int* old_sup_seq_idx, int* adj_diff) { //DELETE LATER
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-	old_sup_seq_idx[i] -= adj_diff[i];
 }
 
 __global__ void calculateNewSeqPos(char* seq_trimmed, int* seq_start, int* assemble_start, int* old_sup_seq_idx, int* single_seq_size, int* seq_val_trimmed_size) {
@@ -506,19 +475,27 @@ int main(int argc, char** argv)
 	auto start = std::chrono::high_resolution_clock::now();
 
 	//enum for measuring exec time of different parts of program
-	enum TimeMeasure
+	/*enum TimeMeasure
 	{
 		disk_to_RAM, RAM_to_VRAM, scan_db, prefix_sum, stream_compaction, VRAM_to_RAM, RAM_to_disk, other_GPU, write_results, init
 	};
-	trackTime(TimeMeasure::init);
+	trackTime(TimeMeasure::init);*/
 	
+	int h_unique_item_count; //value stating how many unique items are in database
 	//check argc
-	if (argc != 5) {
+	switch (argc) {
+	case 4:
+		h_unique_item_count = 26;
+		break;
+	case 5:
+		h_unique_item_count = std::stoi(argv[4]);
+		break;
+	default:
 		std::cout << "Incorrect number of input arguments\n";
 		return 0;
 	}
 
-	float h_float_min_sup = atof(argv[3]); //minimum support
+	float h_float_min_sup = std::stof(argv[3]); //minimum support
 
 	if (h_float_min_sup > 1 || h_float_min_sup <= 0) {
 		std::cout << "Incorrect minimum support value\n";
@@ -529,13 +506,12 @@ int main(int argc, char** argv)
 	std::ifstream file(argv[1]); //input database file
 	std::ofstream output(argv[2]); //output sequences file
 	std::string output_string; // string for writing to output file
-	int h_unique_item_count = atoi(argv[4]); //value stating how many unique items are in database
 	std::string h_database; //all database items in a single string
 	std::vector<int> h_row_idx_start; //starting point of all rows in database
 	std::vector<int> h_seq_val(h_unique_item_count); //frequency of sequences
 	std::vector<char> h_seq(h_unique_item_count); //potential frequent sequences
-	std::vector<int> h_target_index; //DEBUG
-	std::vector<int> h_debug; //DEBUG
+	//std::vector<int> h_target_index; //DEBUG
+	//std::vector<int> h_debug; //DEBUG
 	std::vector<std::string> h_freq_seq; //found frequent sequences
 	std::vector<int> h_seq_start; //index for first sequence in all sub databases, used to calculate number of appends and assemblages in sub databases
 	std::vector<int> h_assemble_start;//index for first assemblage in all sub databases, used to calculate number of appends and assemblages in sub databases
@@ -545,7 +521,7 @@ int main(int argc, char** argv)
 	int h_seq_size;//number of potential frequent sequences
 	int h_single_seq_size = 1;//single sequence size = 2n + 1, where n = number of algorithm iterations
 	int h_trimmed_seq_size;//how many frequent sequences were found in given iteration
-	int h_seq_start_size;
+	int h_seq_start_size; 
 	int h_min_sup; //minimum support expressed as number of rows in database
 	
 
@@ -582,12 +558,12 @@ int main(int argc, char** argv)
 	const unsigned int max_block_size = 512;
 
 	cudaError_t cudaStatus; //error container
-	size_t h_free_memory;
+	/*size_t h_free_memory;
 	size_t h_total_memory;
 	unsigned long long h_requied_memory;
 	unsigned long long h_allocation_size;
 	int h_partition_num;
-	bool h_alloc_success;
+	bool h_alloc_success;*/
 
 
 	for (int i = 0; i < h_unique_item_count; i++) {
@@ -619,7 +595,7 @@ int main(int argc, char** argv)
 	h_new_database_size = h_database_size * h_unique_item_count;
 	h_min_sup = ceil(h_database_size * h_float_min_sup);
 
-	trackTime(TimeMeasure::disk_to_RAM);
+	//trackTime(TimeMeasure::disk_to_RAM);
 
 	//allocate memory on GPU and copy data
 	cudaStatus = cudaMalloc((void**)&d_database, sizeof(char) * h_database.size());
@@ -655,7 +631,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaMalloc((void**)&d_seq_size, sizeof(int));
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::RAM_to_VRAM);
+	//trackTime(TimeMeasure::RAM_to_VRAM);
 
 	//determine block and grid size
 	if (h_database_size > max_block_size) {
@@ -674,7 +650,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaGetLastError();
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::scan_db);
+	//trackTime(TimeMeasure::scan_db);
 
 	cudaStatus = cudaMalloc((void**)&d_target_index, sizeof(int) * h_unique_item_count * h_database_size);
 	checkError(cudaStatus);
@@ -685,7 +661,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaMemcpyToSymbol(d_unique_item_count, &h_unique_item_count, sizeof(int));
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::RAM_to_VRAM);
+	//trackTime(TimeMeasure::RAM_to_VRAM);
 
 	//check which rows didn't contain frequent sequence
 	prepareVector <<<grid_size, block_size >>> (d_new_row_idx_start, d_target_index, d_seq_val, d_database_size);
@@ -694,7 +670,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaGetLastError();
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::other_GPU);
+	//trackTime(TimeMeasure::other_GPU);
 
 	//DEBUG
 	/*h_target_index.resize(h_new_database_size);
@@ -706,7 +682,7 @@ int main(int argc, char** argv)
 	thrust::device_ptr<int> d_thrust_ptr = thrust::device_pointer_cast(d_target_index);
 	thrust::inclusive_scan(d_thrust_ptr, d_thrust_ptr + h_new_database_size, d_thrust_ptr);
 
-	trackTime(TimeMeasure::prefix_sum);
+	//trackTime(TimeMeasure::prefix_sum);
 
 	cudaStatus = cudaMemcpy(&h_database_size, d_target_index + (h_new_database_size - 1), sizeof(int), cudaMemcpyDeviceToHost);
 	checkError(cudaStatus);
@@ -735,7 +711,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaGetLastError();
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::stream_compaction);
+	//trackTime(TimeMeasure::stream_compaction);
 
 	cudaStatus = cudaMemcpy(d_database_size, d_target_index + (h_new_database_size - 1), sizeof(int), cudaMemcpyDeviceToDevice);
 	checkError(cudaStatus);
@@ -743,7 +719,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaMemcpy(h_seq_val.data(), d_seq_val, sizeof(int) * h_seq_val.size(), cudaMemcpyDeviceToHost);
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::VRAM_to_RAM);
+	//trackTime(TimeMeasure::VRAM_to_RAM);
 	//DEBUG
 	/*h_target_index.resize(h_database_size);
 	cudaStatus = cudaMemcpy(h_target_index.data(), d_row_idx_start, sizeof(int) * h_target_index.size(), cudaMemcpyDeviceToHost);
@@ -763,7 +739,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaMemcpy(d_seq_size, &h_unique_item_count, sizeof(int), cudaMemcpyHostToDevice);
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::RAM_to_VRAM);
+	//trackTime(TimeMeasure::RAM_to_VRAM);
 
 	grid_size = { 1, 1, 1 };
 	block_size = { (unsigned int)h_unique_item_count, 1, 1 };
@@ -807,7 +783,7 @@ int main(int argc, char** argv)
 	cudaStatus = cudaGetLastError();
 	checkError(cudaStatus);
 
-	trackTime(TimeMeasure::other_GPU);
+	//trackTime(TimeMeasure::other_GPU);
 
 	//copy results to CPU
 	h_seq_val.resize(h_trimmed_seq_size);
@@ -835,7 +811,7 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	trackTime(TimeMeasure::VRAM_to_RAM);
+	//trackTime(TimeMeasure::VRAM_to_RAM);
 
 	//print frequent sequences 
 	/*for (int i = 0; i < std::size(h_seq_val); i++) {
@@ -854,7 +830,7 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	trackTime(TimeMeasure::RAM_to_disk);
+	//trackTime(TimeMeasure::RAM_to_disk);
 
 	cudaFree(d_seq);
 	cudaFree(d_seq_val);
@@ -958,7 +934,7 @@ int main(int argc, char** argv)
 
 	cudaFree(d_old_sup_seq_idx);
 
-	trackTime(TimeMeasure::other_GPU);
+	//trackTime(TimeMeasure::other_GPU);
 
 	//DEBUG
 	/*h_seq.resize(h_seq_size * h_single_seq_size);
@@ -1003,7 +979,7 @@ int main(int argc, char** argv)
 		cudaFree(d_seq_val_idx);
 		cudaFree(d_new_row_idx_size);
 
-		trackTime(TimeMeasure::scan_db);
+		//trackTime(TimeMeasure::scan_db);
 
 		//determine block and grid size
 		if (h_new_database_size > max_block_size) {
@@ -1028,13 +1004,13 @@ int main(int argc, char** argv)
 		checkError(cudaStatus);*/
 		//DEBUGEND
 
-		trackTime(TimeMeasure::other_GPU);
+		//trackTime(TimeMeasure::other_GPU);
 
 		//prefix sum
 		d_thrust_ptr = thrust::device_pointer_cast(d_target_index);
 		thrust::inclusive_scan(d_thrust_ptr, d_thrust_ptr + h_new_database_size, d_thrust_ptr);
 
-		trackTime(TimeMeasure::prefix_sum);
+		//trackTime(TimeMeasure::prefix_sum);
 
 		cudaStatus = cudaMemcpy(&h_database_size, d_target_index + (h_new_database_size - 1), sizeof(int), cudaMemcpyDeviceToHost);
 		checkError(cudaStatus);
@@ -1042,7 +1018,7 @@ int main(int argc, char** argv)
 		cudaStatus = cudaMemcpy(d_database_size, d_target_index + (h_new_database_size - 1), sizeof(int), cudaMemcpyDeviceToDevice);
 		checkError(cudaStatus);
 
-		trackTime(TimeMeasure::VRAM_to_RAM);
+		//trackTime(TimeMeasure::VRAM_to_RAM);
 
 		cudaFree(d_row_idx_start);
 
@@ -1063,7 +1039,7 @@ int main(int argc, char** argv)
 		cudaFree(d_new_row_idx_start);
 		cudaFree(d_target_index);
 
-		trackTime(TimeMeasure::stream_compaction);
+		//trackTime(TimeMeasure::stream_compaction);
 		//DEBUG
 		/*h_seq_val.resize(h_seq_size);
 		cudaStatus = cudaMemcpy(h_seq_val.data(), d_seq_val, sizeof(int) * h_seq_val.size(), cudaMemcpyDeviceToHost);
@@ -1197,12 +1173,6 @@ int main(int argc, char** argv)
 		thrust::inclusive_scan(d_thrust_ptr, d_thrust_ptr + h_trimmed_seq_size, d_thrust_ptr);
 		
 
-		/*substraction <<<grid_size, block_size >>> (d_old_sup_seq_idx, d_adj_diff);
-
-		cudaDeviceSynchronize();
-		cudaStatus = cudaGetLastError();
-		checkError(cudaStatus);*/
-
 		thrust::device_ptr<int> d_thrust_ptr2 = thrust::device_pointer_cast(d_old_sup_seq_idx);
 		thrust::transform(d_thrust_ptr2, d_thrust_ptr2 + h_trimmed_seq_size, d_thrust_ptr, d_thrust_ptr2, thrust::minus<int>());
 
@@ -1225,7 +1195,7 @@ int main(int argc, char** argv)
 		//DEBUGEND
 
 		cudaFree(d_adj_diff);
-		trackTime(TimeMeasure::other_GPU);
+		//trackTime(TimeMeasure::other_GPU);
 	
 		//DEBUG
 		/*h_target_index.resize(h_trimmed_seq_size);
@@ -1250,7 +1220,7 @@ int main(int argc, char** argv)
 		cudaStatus = cudaMemcpy(h_seq.data(), d_seq_trimmed, sizeof(char) * h_seq.size(), cudaMemcpyDeviceToHost);
 		checkError(cudaStatus);
 
-		trackTime(TimeMeasure::VRAM_to_RAM);
+		//trackTime(TimeMeasure::VRAM_to_RAM);
 
 		output_string.clear();
 		for (int i = 0; i < h_seq_val.size(); i++) {
@@ -1288,7 +1258,7 @@ int main(int argc, char** argv)
 			output << " " << h_seq_val[i] << "\n";
 		}*/
 
-		trackTime(TimeMeasure::RAM_to_disk);
+		//trackTime(TimeMeasure::RAM_to_disk);
 
 		//Prepare new sequences
 		h_single_seq_size += 2; //single sequence size = 2n + 1, where n = number of algorithm iterations
@@ -1469,7 +1439,7 @@ int main(int argc, char** argv)
 		cudaStatus = cudaMemset(d_new_row_idx_start, 0, sizeof(int) * h_new_database_size);
 		checkError(cudaStatus);
 
-		trackTime(TimeMeasure::other_GPU);
+		//trackTime(TimeMeasure::other_GPU);
 
 		//Check available memory
 		/*cudaMemGetInfo(&h_free_memory, &h_total_memory);
@@ -1482,7 +1452,7 @@ int main(int argc, char** argv)
 	cudaFree(d_database);
 	cudaFree(d_database_size);
 
-	trackTime(TimeMeasure::write_results);
+	//trackTime(TimeMeasure::write_results);
 	// stop timer
 	auto stop = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
